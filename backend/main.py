@@ -2,14 +2,14 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
+import json
 from model_loader import load_generator_model
 
 app = FastAPI()
 
-# Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace "*" with your frontend URL if you want to restrict it
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,60 +43,60 @@ class Sensors(BaseModel):
 LATENT_DIM = 8
 generator_model = load_generator_model()
 
-# 🔥 WebSocket Endpoint
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    print("WebSocket connection accepted")
     try:
         while True:
-            # Receive JSON data from client
-            data = await websocket.receive_json()
-            sensors = Sensors(**data)
-
-            # Convert to scaled numpy array
-            input_values = [value / 100.0 for value in sensors.dict().values()]
-            sensors_array = np.array(input_values).reshape(1, -1).astype(np.float32)
-
-            noise = np.random.normal(0, 1, (1, LATENT_DIM)).astype(np.float32)
-            predicted_settings = generator_model.predict([noise, sensors_array])
-
-            settings_list = predicted_settings[0].tolist()
-
-            setting_names = [
-                'part' / 100,
-                'extract_tank_level' / 100,
-                'ffte_discharge_density' / 100,
-                'ffte_discharge_solids' / 100,
-                'ffte_feed_flow_rate_pv' / 100,
-                'ffte_feed_solids_pv' / 100,
-                'ffte_heat_temperature_1' / 100,
-                'ffte_heat_temperature_2' / 100,
-                'ffte_heat_temperature_3' / 100,
-                'ffte_production_solids_pv' / 100,
-                'ffte_steam_pressure_pv' / 100,
-                'tfe_input_flow_pv' / 100,
-                'tfe_level' / 100,
-                'tfe_motor_current' / 100,
-                'tfe_motor_speed' / 100,
-                'tfe_out_flow_pv' / 100,
-                'tfe_production_solids_pv' / 100,
-                'tfe_production_solids_density' / 100,
-                'tfe_steam_pressure_pv' / 100,
-                'tfe_steam_temperature' / 100,
-                'tfe_tank_level' / 100,
-                'tfe_temperature' / 100,
-                'tfe_vacuum_pressure_pv' / 100,
-            ]
-
-            labeled_settings = {name: round(val * 100, 0) for name, val in zip(setting_names, settings_list)}
-
-            await websocket.send_json({
-                "recommended_settings": labeled_settings,
-                "raw_values": settings_list,
-            })
+            message = await websocket.receive_text()            
+            if message == "Hello":
+                await websocket.send_text("Hello back!")
+                continue
+                
+            try:
+                data = json.loads(message)
+                sensors = Sensors(**data)
+                
+                input_values = [value / 100.0 for value in sensors.dict().values()]
+                sensors_array = np.array(input_values).reshape(1, -1).astype(np.float32)
+                
+                noise = np.random.normal(0, 1, (1, LATENT_DIM)).astype(np.float32)
+                predicted_settings = generator_model.predict([noise, sensors_array])
+                
+                settings_list = predicted_settings[0].tolist()
+                
+                setting_names = [
+                    "FFTE Feed solids SP",
+                    "FFTE Production solids SP",
+                    "FFTE Steam pressure SP",
+                    "TFE Out flow SP",
+                    "TFE Production solids SP",
+                    "TFE Vacuum pressure SP",
+                    "TFE Steam pressure SP",
+                ]
+                
+                labeled_settings = {name: round(val * 100, 2) for name, val in zip(setting_names, settings_list)}
+                
+                response = {
+                    "recommended_settings": labeled_settings,
+                    "raw_values": settings_list,
+                }
+                
+                await websocket.send_text(json.dumps(response))
+                
+            except json.JSONDecodeError as e:
+                print(f"JSON decode error: {e}")
+                await websocket.send_text(f"Error: Invalid JSON - {str(e)}")
+            except Exception as e:
+                print(f"Processing error: {e}")
+                await websocket.send_text(f"Error: {str(e)}")
 
     except WebSocketDisconnect:
         print("Client disconnected")
     except Exception as e:
-        await websocket.close(code=1011)
         print(f"WebSocket error: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

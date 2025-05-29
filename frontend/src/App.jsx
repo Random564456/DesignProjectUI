@@ -1,5 +1,5 @@
 import './App.css'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import CSVReader from './components/CSVReader';
 import DataDisplay from './components/DataDisplay';
 
